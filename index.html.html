@@ -350,10 +350,9 @@
 // 設定
 // ================================================================
 const TWSE_EXCHANGE = 'https://www.twse.com.tw/exchangeReport';
-const TWSE_RWD = 'https://www.twse.com.tw/rwd/zh';
 const TPEX = 'https://www.tpex.org.tw';
-// CORS proxy 備援（GitHub Pages 跨域時使用）
-const CORS_PROXY = 'https://corsproxy.io/?url=';
+// allorigins 可繞過 CORS，免費公開服務
+const PROXY = 'https://api.allorigins.win/raw?url=';
 
 // 處置條件門檻
 const COND = {
@@ -442,53 +441,33 @@ async function safeFetch(url) {
   }
 }
 
-// 嘗試多個 endpoint，第一個成功的就用
-async function tryFetch(urls) {
-  for (const url of urls) {
-    const r = await safeFetch(url);
-    if (r) return r;
-  }
-  return null;
-}
-
-// TWSE 所有上市股票當日行情（三個備援路徑）
+// TWSE 所有上市股票當日行情（直連，TWSE 有開放 CORS）
 async function fetchTWSEDay(date) {
   const d = fmtTWSE(date);
-  return tryFetch([
-    `${TWSE_EXCHANGE}/STOCK_DAY_ALL?response=json&date=${d}`,
-    `${TWSE_RWD}/afterTrading/STOCK_DAY_ALL?date=${d}&response=json`,
-    `${CORS_PROXY}${encodeURIComponent(`${TWSE_EXCHANGE}/STOCK_DAY_ALL?response=json&date=${d}`)}`,
-  ]);
+  return safeFetch(`${TWSE_EXCHANGE}/STOCK_DAY_ALL?response=json&date=${d}`);
 }
 
-// TPEX 所有上櫃股票當日行情
+// TPEX 所有上櫃股票當日行情（TPEX 不允許跨域，透過 proxy）
 async function fetchTPEXDay(date) {
   const d = fmtTPEX(date);
-  const primary = `${TPEX}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d=${encodeURIComponent(d)}&se=EW&response=json`;
-  return tryFetch([
-    primary,
-    `${CORS_PROXY}${encodeURIComponent(primary)}`,
-  ]);
+  const target = `${TPEX}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d=${encodeURIComponent(d)}&se=EW&response=json`;
+  return safeFetch(`${PROXY}${encodeURIComponent(target)}`);
 }
 
 // TWSE 目前處置股票
 async function fetchTWSEDisposal(date) {
   const d = fmtTWSE(date);
-  return tryFetch([
-    `${TWSE_EXCHANGE}/BWIBBU_d?response=json&date=${d}`,
-    `${TWSE_RWD}/trading/BWIBBU?date=${d}&response=json`,
-    `${CORS_PROXY}${encodeURIComponent(`${TWSE_EXCHANGE}/BWIBBU_d?response=json&date=${d}`)}`,
-  ]);
+  // 先直連，失敗再 proxy
+  const r = await safeFetch(`${TWSE_EXCHANGE}/BWIBBU_d?response=json&date=${d}`);
+  if (r) return r;
+  return safeFetch(`${PROXY}${encodeURIComponent(`${TWSE_EXCHANGE}/BWIBBU_d?response=json&date=${d}`)}`);
 }
 
-// TPEX 目前處置股票
+// TPEX 目前處置股票（透過 proxy）
 async function fetchTPEXDisposal(date) {
   const d = fmtTPEX(date);
-  const primary = `${TPEX}/web/regular_emerging/callAuction/disposal/disposal_result.php?l=zh-tw&d=${encodeURIComponent(d)}&response=json`;
-  return tryFetch([
-    primary,
-    `${CORS_PROXY}${encodeURIComponent(primary)}`,
-  ]);
+  const target = `${TPEX}/web/regular_emerging/callAuction/disposal/disposal_result.php?l=zh-tw&d=${encodeURIComponent(d)}&response=json`;
+  return safeFetch(`${PROXY}${encodeURIComponent(target)}`);
 }
 
 // ================================================================
