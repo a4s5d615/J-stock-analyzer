@@ -351,8 +351,7 @@
 // ================================================================
 const TWSE_EXCHANGE = 'https://www.twse.com.tw/exchangeReport';
 const TPEX = 'https://www.tpex.org.tw';
-// allorigins 可繞過 CORS，免費公開服務
-const PROXY = 'https://api.allorigins.win/raw?url=';
+const PROXY = 'https://corsproxy.io/?url=';
 
 // 處置條件門檻
 const COND = {
@@ -667,12 +666,14 @@ async function loadAll() {
     ]))
   );
 
-  // 統計成功載入天數
-  const successDays = dayResults.filter(([t, p]) => t || p).length;
-  const totalStocksPerDay = dayResults.map(([t]) => t?.data?.length || 0);
-  const maxStocks = Math.max(...totalStocksPerDay);
-  console.log(`成功載入 ${successDays}/${days.length} 天，最多 ${maxStocks} 檔股票/天`);
-  document.getElementById('cntUpdated').textContent = `已分析 ${successDays}天資料，${maxStocks}檔股票`;
+  // 統計
+  const twseDays  = dayResults.filter(([t]) => t?.data?.length > 0).length;
+  const tpexDays  = dayResults.filter(([, p]) => p?.aaData?.length > 0).length;
+  const maxTWSE   = Math.max(...dayResults.map(([t]) => t?.data?.length || 0));
+  const maxTPEX   = Math.max(...dayResults.map(([, p]) => p?.aaData?.length || 0));
+  console.log(`TWSE: ${twseDays}天 / 最多${maxTWSE}檔，TPEX: ${tpexDays}天 / 最多${maxTPEX}檔`);
+  document.getElementById('cntUpdated').textContent =
+    `TWSE ${maxTWSE}檔 / TPEX ${maxTPEX || '失敗'}檔`;
 
   // 建立每個股票的歷史陣列（由新到舊）
   const histMap = {}; // { id: [day0, day1, ...] }
@@ -718,7 +719,7 @@ async function loadAll() {
   // 更新 counts
   document.getElementById('cnt1').textContent = risk1.length;
   document.getElementById('cnt2').textContent = risk2.length;
-  document.getElementById('cntDisp').textContent = currentDisposals.length || '（API失敗）';
+  document.getElementById('cntDisp').textContent = currentDisposals.length > 0 ? currentDisposals.length : '（API失敗）';
   document.getElementById('cntUpdated').textContent = new Date().toLocaleTimeString('zh-TW');
   document.getElementById('badge1').textContent = `${risk1.length} 檔`;
   document.getElementById('badge2').textContent = `${risk2.length} 檔`;
