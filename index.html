@@ -453,21 +453,21 @@ async function fetchTPEXDay(date) {
   return safeFetch(`${PROXY}${encodeURIComponent(target)}`);
 }
 
-// TWSE 目前處置股票（官方確認可用 endpoint）
+// TWSE 目前處置股票（先直連，失敗用 proxy）
 async function fetchTWSEDisposal() {
-  return safeFetch('https://www.twse.com.tw/rwd/zh/announcement/punish?response=json');
+  const url = 'https://www.twse.com.tw/rwd/zh/announcement/punish?response=json';
+  const r = await safeFetch(url);
+  if (r && r.stat === 'OK') return r;
+  return safeFetch(`${PROXY}${encodeURIComponent(url)}`);
 }
 
-// TWSE 注意股（用於輔助判斷）
-async function fetchTWSENotice() {
-  return safeFetch('https://www.twse.com.tw/rwd/zh/announcement/notice?response=json');
-}
-
-// TPEX 目前處置股票（透過 proxy 繞過 CORS）
+// TPEX 目前處置股票（透過 proxy）
 async function fetchTPEXDisposal() {
-  const target = `${TPEX}/zh-tw/announce/market/disposal.html`;
-  // TPEX 新版 API 路徑尚未確認，暫時回傳空
-  return null;
+  const target = 'https://www.tpex.org.tw/rwd/zh/bulletin/disposal?response=json';
+  const r = await safeFetch(`${PROXY}${encodeURIComponent(target)}`);
+  if (r) return r;
+  const target2 = 'https://www.tpex.org.tw/web/bulletin/disposal/disposal_query_result.php?l=zh-tw&response=json';
+  return safeFetch(`${PROXY}${encodeURIComponent(target2)}`);
 }
 
 // ================================================================
