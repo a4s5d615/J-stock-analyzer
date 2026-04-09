@@ -349,8 +349,9 @@
 // ================================================================
 // 設定
 // ================================================================
-const TWSE = 'https://www.twse.com.tw/rwd/zh';
+const TWSE_EXCHANGE = 'https://www.twse.com.tw/exchangeReport';
 const TPEX = 'https://www.tpex.org.tw';
+const PROXY = 'https://corsproxy.io/?url=';
 
 // 處置條件門檻
 const COND = {
@@ -428,39 +429,45 @@ function refreshNavButtons() {
 // ================================================================
 async function safeFetch(url) {
   try {
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const res = await fetch(url);
     if (!res.ok) return null;
-    return await res.json();
+    const text = await res.text();
+    if (!text || text.trim() === '') return null;
+    return JSON.parse(text);
   } catch (e) {
     console.warn('[fetch error]', url, e.message);
     return null;
   }
 }
 
-// TWSE 所有上市股票當日行情
+// TWSE 所有上市股票當日行情（直連，TWSE 有開放 CORS）
 async function fetchTWSEDay(date) {
-  const url = `${TWSE}/afterTrading/STOCK_DAY_ALL?date=${fmtTWSE(date)}&response=json`;
-  return safeFetch(url);
+  const d = fmtTWSE(date);
+  return safeFetch(`${TWSE_EXCHANGE}/STOCK_DAY_ALL?response=json&date=${d}`);
 }
 
-// TPEX 所有上櫃股票當日行情
+// TPEX 所有上櫃股票當日行情（TPEX 不允許跨域，透過 proxy）
 async function fetchTPEXDay(date) {
   const d = fmtTPEX(date);
-  const url = `${TPEX}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d=${encodeURIComponent(d)}&se=EW&response=json`;
-  return safeFetch(url);
+  const target = `${TPEX}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d=${encodeURIComponent(d)}&se=EW&response=json`;
+  return safeFetch(`${PROXY}${encodeURIComponent(target)}`);
 }
 
-// TWSE 目前處置股票
-async function fetchTWSEDisposal(date) {
-  const url = `${TWSE}/trading/BWIBBU?date=${fmtTWSE(date)}&response=json`;
-  return safeFetch(url);
+// TWSE 目前處置股票（官方確認可用 endpoint）
+async function fetchTWSEDisposal() {
+  return safeFetch('https://www.twse.com.tw/rwd/zh/announcement/punish?response=json');
 }
 
-// TPEX 目前處置股票
-async function fetchTPEXDisposal(date) {
-  const d = fmtTPEX(date);
-  const url = `${TPEX}/web/regular_emerging/callAuction/disposal/disposal_result.php?l=zh-tw&d=${encodeURIComponent(d)}&response=json`;
-  return safeFetch(url);
+// TWSE 注意股（用於輔助判斷）
+async function fetchTWSENotice() {
+  return safeFetch('https://www.twse.com.tw/rwd/zh/announcement/notice?response=json');
+}
+
+// TPEX 目前處置股票（透過 proxy 繞過 CORS）
+async function fetchTPEXDisposal() {
+  const target = `${TPEX}/zh-tw/announce/market/disposal.html`;
+  // TPEX 新版 API 路徑尚未確認，暫時回傳空
+  return null;
 }
 
 // ================================================================
@@ -517,33 +524,37 @@ function parseTPEXDay(json, date) {
 
 function parseTWSEDisposal(json) {
   if (!json || json.stat !== 'OK' || !Array.isArray(json.data)) return [];
-  // Attempt to parse disposal list; field order may vary
-  return json.data.map((r, i) => ({
-    id: (r[0] || '').trim(),
-    name: (r[1] || '').trim(),
-    market: 'TWSE',
-    auctionType: (r[2] || '').trim(),
-    startDate: (r[3] || '').trim(),
-    endDate: (r[4] || '').trim(),
-    releaseDate: (r[5] || '').trim(),
-    remainDays: parseInt(r[6]) || 0,
-    reason: (r[7] || '').trim(),
-  })).filter(s => s.id);
+  // TWSE punish API 回傳物件陣列，key 為中文
+  return json.data.map(r => {
+    const period = (r['處置起迄時間'] || '').trim();
+    const parts = period.split('～');
+    return {
+      id: (r['證券代號'] || '').trim(),
+      name: (r['證券名稱'] || '').trim(),
+      market: 'TWSE',
+      auctionType: (r['處置措施'] || '').trim(),
+      startDate: parts[0] || period,
+      endDate: parts[1] || '',
+      releaseDate: parts[1] || '',
+      remainDays: 0,
+      reason: (r['處置條件'] || '').trim(),
+    };
+  }).filter(s => s.id);
 }
 
 function parseTPEXDisposal(json) {
   if (!json) return [];
-  const list = json.aaData || json.data || [];
+  const list = json.tables?.[0]?.data || json.aaData || json.data || [];
   return list.map(r => ({
-    id: (r[0] || '').trim(),
-    name: (r[1] || '').trim(),
+    id: (r[2] || '').trim(),
+    name: (r[3] || '').trim(),
     market: 'TPEX',
-    auctionType: (r[2] || '').trim(),
-    startDate: (r[3] || '').trim(),
-    endDate: (r[4] || '').trim(),
+    auctionType: (r[7] || '').trim(),
+    startDate: (r[4] || '').trim(),
+    endDate: (r[5] || '').trim(),
     releaseDate: (r[5] || '').trim(),
-    remainDays: parseInt(r[6]) || 0,
-    reason: (r[7] || '').trim(),
+    remainDays: 0,
+    reason: (r[4] || '').trim(),
   })).filter(s => s.id);
 }
 
@@ -655,6 +666,15 @@ async function loadAll() {
     ]))
   );
 
+  // 統計
+  const twseDays  = dayResults.filter(([t]) => t?.data?.length > 0).length;
+  const tpexDays  = dayResults.filter(([, p]) => p?.aaData?.length > 0).length;
+  const maxTWSE   = Math.max(...dayResults.map(([t]) => t?.data?.length || 0));
+  const maxTPEX   = Math.max(...dayResults.map(([, p]) => p?.aaData?.length || 0));
+  console.log(`TWSE: ${twseDays}天 / 最多${maxTWSE}檔，TPEX: ${tpexDays}天 / 最多${maxTPEX}檔`);
+  document.getElementById('cntUpdated').textContent =
+    `TWSE ${maxTWSE}檔 / TPEX ${maxTPEX || '失敗'}檔`;
+
   // 建立每個股票的歷史陣列（由新到舊）
   const histMap = {}; // { id: [day0, day1, ...] }
   dayResults.forEach(([twseJson, tpexJson], idx) => {
@@ -682,8 +702,8 @@ async function loadAll() {
 
   // 抓當前處置中名單
   const [twseDisp, tpexDisp] = await Promise.all([
-    fetchTWSEDisposal(currentDate),
-    fetchTPEXDisposal(currentDate),
+    fetchTWSEDisposal(),
+    fetchTPEXDisposal(),
   ]);
   currentDisposals = [
     ...parseTWSEDisposal(twseDisp),
@@ -699,7 +719,7 @@ async function loadAll() {
   // 更新 counts
   document.getElementById('cnt1').textContent = risk1.length;
   document.getElementById('cnt2').textContent = risk2.length;
-  document.getElementById('cntDisp').textContent = currentDisposals.length || '（API失敗）';
+  document.getElementById('cntDisp').textContent = currentDisposals.length > 0 ? currentDisposals.length : '（API失敗）';
   document.getElementById('cntUpdated').textContent = new Date().toLocaleTimeString('zh-TW');
   document.getElementById('badge1').textContent = `${risk1.length} 檔`;
   document.getElementById('badge2').textContent = `${risk2.length} 檔`;
