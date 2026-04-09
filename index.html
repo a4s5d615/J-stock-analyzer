@@ -446,11 +446,14 @@ async function fetchTWSEDay(date) {
   return safeFetch(`${TWSE_EXCHANGE}/STOCK_DAY_ALL?response=json&date=${d}`);
 }
 
-// TPEX 所有上櫃股票當日行情（TPEX 不允許跨域，透過 proxy）
+// TPEX 所有上櫃股票當日行情（透過 proxy）
 async function fetchTPEXDay(date) {
   const d = fmtTPEX(date);
   const target = `${TPEX}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d=${encodeURIComponent(d)}&se=EW&response=json`;
-  return safeFetch(`${PROXY}${encodeURIComponent(target)}`);
+  const r = await safeFetch(`${PROXY}${encodeURIComponent(target)}`);
+  if (r) return r;
+  // 直連備援
+  return safeFetch(target);
 }
 
 // TWSE 目前處置股票（先直連，失敗用 proxy）
@@ -499,9 +502,11 @@ function parseTWSEDay(json, date) {
 }
 
 function parseTPEXDay(json, date) {
-  if (!json || !Array.isArray(json.aaData)) return [];
-  // TPEX fields: 0=代號 1=名稱 2=收盤 3=漲跌 4=開盤 5=最高 6=最低 7=均價 8=成交股數
-  return json.aaData
+  // TPEX 新版格式: { tables: [{ data: [...] }] }
+  const rows = json?.tables?.[0]?.data || json?.aaData || [];
+  if (!rows.length) return [];
+  // fields: 0=代號 1=名稱 2=收盤 3=漲跌 4=開盤 5=最高 6=最低 7=均價 8=成交股數(張) 9=成交金額
+  return rows
     .map(r => {
       const close = parseNum(r[2]);
       const chg = parseNum(r[3]);
